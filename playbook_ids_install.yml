@@ -1,0 +1,112 @@
+---
+- hosts: "*"
+  become: yes
+  tasks:
+    - name: Add OISF Suricata stable repository from PPA and install its signing key on Debian target
+      ansible.builtin.apt_repository:
+        repo: 'ppa:oisf/suricata-stable'
+        codename: jammy
+    - name: Download Zeek Repo GPG Key
+      ansible.builtin.get_url:
+        url: https://download.opensuse.org/repositories/security:zeek/xUbuntu_22.04/Release.key
+        dest: /tmp/zeek-repo.key
+    - name: Add GPG key for OpenSUSE Zeek Repo
+      ansible.builtin.shell: cat /tmp/zeek-repo.key | gpg --dearmor | tee /etc/apt/trusted.gpg.d/security_zeek.gpg > /dev/null
+        #warn: false
+    - name: Add OpenSUSE Zeek Repo
+      ansible.builtin.apt_repository:
+        repo: 'deb http://download.opensuse.org/repositories/security:/zeek/xUbuntu_22.04/ /'
+    - name: Install plocate
+      apt:
+        name: "plocate"
+        state: latest
+    - name: Install zeek
+      apt:
+        name: "zeek"
+        state: latest
+    - name: Install suricata
+      apt:
+        name: "suricata"
+        state: latest
+        - name: Set IDS interface in zeek config
+      ansible.builtin.lineinfile:
+        path: /opt/zeek/etc/node.cfg
+        regexp: '^interface='
+        line: interface={{ ids_intf }}
+    - name: Replace eth0 instances with IDS interface name in suricata.yaml
+      ansible.builtin.replace:
+        path: /etc/suricata/suricata.yaml
+        regexp: 'interface: eth0'
+        replace: 'interface: {{ ids_intf }}'
+    - name: Remove version line from netplan conf
+      ansible.builtin.lineinfile:
+        path: /etc/netplan/00-installer-config.yaml
+        state: absent
+        regexp: 'version: 2'
+    - name: Add IDS interface block (and version) to end of netplan conf
+      ansible.builtin.blockinfile:
+        path: /etc/netplan/00-installer-config.yaml
+        state: present
+        insertafter: EOF
+        block: |
+          '    {{ ids_intf }}: {}'
+          '  version: 2'
+    - name: Clean up single quotes from blockinfile command
+      ansible.builtin.replace:
+        path: /etc/netplan/00-installer-config.yaml
+        regexp: "'"
+        replace: ""
+    - name: Create /opt/scripts directory
+      ansible.builtin.file:
+        path: /opt/scripts
+        state: directory
+        mode: '0755'
+    - name: Create the interface prep shell script using ids_intf variable
+      ansible.builtin.template:
+        src: intf_prep.sh.j2
+        dest: /opt/scripts/intf_prep.sh
+        owner: root
+        group: root
+        mode: 0770
+      become: yes
+        - name: Create systemd service file for intf prep
+      ansible.builtin.template:
+        src: systemd-promisc.j2
+        dest: /lib/systemd/system/promisc-interface.service
+        owner: root
+        group: root
+        mode: 0644
+      become: yes
+    - name: Create systemd service file for zeek
+      ansible.builtin.template:
+        src: systemd-zeek.j2
+        dest: /lib/systemd/system/zeek.service
+        owner: root
+        group: root
+        mode: 0644
+      become: yes
+    - name: enable new promisc-interface.service
+      ansible.builtin.shell: systemctl enable promisc-interface
+    - name: enable new zeek.service
+      ansible.builtin.shell: systemctl enable zeek
+    - name: Add /opt/zeek/spool/zeek/ cleanup to crontab
+      ansible.builtin.lineinfile:
+        path: /etc/crontab
+        insertafter: EOF
+        line: 0 0     * * *   root    find /opt/zeek/spool/zeek/*.*.log -daystart -mtime +0 -type f -exec rm {} \;
+    - name: Add /opt/zeek/logs/ cleanup to crontab
+      ansible.builtin.lineinfile:
+        path: /etc/crontab
+        insertafter: EOF
+        line: 0 0     * * *   root    find /opt/zeek/logs/2* -daystart -mtime +0 -type d -exec rm -rf {} \;
+    - name: Add /var/log/suricata/ cleanup to crontab
+      ansible.builtin.lineinfile:
+        path: /etc/crontab
+        insertafter: EOF
+        line: 0 0     * * *   root    find /var/log/suricata/* -daystart -mtime +0 -type f -exec rm {} \;
+        - name: Change zeek config to create logs in JSON format
+      ansible.builtin.lineinfile:
+        path: /opt/zeek/share/zeek/site/local.zeek
+        insertafter: EOF
+        line: "@load policy/tuning/json-logs.zeek"
+      become: yes
