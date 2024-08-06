@@ -28,7 +28,7 @@
       apt:
         name: "suricata"
         state: latest
-        - name: Set IDS interface in zeek config
+    - name: Set IDS interface in zeek config
       ansible.builtin.lineinfile:
         path: /opt/zeek/etc/node.cfg
         regexp: '^interface='
@@ -69,7 +69,7 @@
         group: root
         mode: 0770
       become: yes
-        - name: Create systemd service file for intf prep
+    - name: Create systemd service file for intf prep
       ansible.builtin.template:
         src: systemd-promisc.j2
         dest: /lib/systemd/system/promisc-interface.service
@@ -104,7 +104,7 @@
         path: /etc/crontab
         insertafter: EOF
         line: 0 0     * * *   root    find /var/log/suricata/* -daystart -mtime +0 -type f -exec rm {} \;
-        - name: Change zeek config to create logs in JSON format
+    - name: Change zeek config to create logs in JSON format
       ansible.builtin.lineinfile:
         path: /opt/zeek/share/zeek/site/local.zeek
         insertafter: EOF
